@@ -41,7 +41,7 @@ Your writing should include:
 Write as if you're explaining to someone with no prior knowledge of the topic. Use analogies, metaphors, and everyday examples to make complex ideas accessible. Always maintain an encouraging, supportive tone.`,
 
   model: process.env.OPENROUTER_API_KEY 
-    ? openrouter("openai/gpt-4o") 
+    ? openrouter("openrouter/sonoma-sky-alpha") 
     : openai("gpt-4o-mini"),
 
   tools: {

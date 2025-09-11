@@ -48,7 +48,7 @@ Provide specific, actionable feedback including:
 Be thorough but constructive in your feedback. Your goal is to ensure the final educational material is of the highest quality for learners.`,
 
   model: process.env.OPENROUTER_API_KEY 
-    ? openrouter("openai/gpt-4o") 
+    ? openrouter("openrouter/sonoma-sky-alpha") 
     : openai("gpt-4o-mini"),
 
   tools: {

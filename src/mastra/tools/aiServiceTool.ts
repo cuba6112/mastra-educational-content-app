@@ -47,48 +47,123 @@ const callOpenRouter = async (config: AIRequestConfig, logger?: IMastraLogger) =
     throw new Error("OPENROUTER_API_KEY environment variable not set");
   }
 
+  const maxRetries = 3;
   const messages = [];
   if (config.systemPrompt) {
     messages.push({ role: "system", content: config.systemPrompt });
   }
   messages.push({ role: "user", content: config.userPrompt });
 
-  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-      "HTTP-Referer": "https://replit.com", // Required for OpenRouter
-      "X-Title": "Educational Content Creator", // Optional
-    },
-    body: JSON.stringify({
-      model: config.model,
-      messages,
-      max_tokens: config.maxTokens || 4000,
-      temperature: config.temperature || 0.7,
-    }),
-  });
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      logger?.info("🔄 [AIService] OpenRouter attempt", { attempt, maxRetries, model: config.model });
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`OpenRouter API error: ${response.status} - ${errorText}`);
+      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+          "HTTP-Referer": "https://replit.com", // Required for OpenRouter
+          "X-Title": "Educational Content Creator", // Optional
+        },
+        body: JSON.stringify({
+          model: config.model,
+          messages,
+          max_tokens: config.maxTokens || 4000,
+          temperature: config.temperature || 0.7,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        
+        // Handle specific error types
+        if (response.status === 429) {
+          // Rate limit - wait longer before retry
+          const waitTime = Math.min(2000 * Math.pow(2, attempt - 1), 30000);
+          logger?.warn("⏳ [AIService] Rate limited, waiting before retry", { 
+            waitTime, 
+            attempt, 
+            model: config.model 
+          });
+          await new Promise(resolve => setTimeout(resolve, waitTime));
+          continue;
+        } else if (response.status === 503 || response.status === 502) {
+          // Service unavailable - shorter wait before retry
+          const waitTime = Math.min(1000 * attempt, 10000);
+          logger?.warn("⏳ [AIService] Service unavailable, waiting before retry", { 
+            waitTime, 
+            attempt, 
+            status: response.status 
+          });
+          await new Promise(resolve => setTimeout(resolve, waitTime));
+          continue;
+        } else if (response.status === 400 && errorText.includes('model')) {
+          // Model not available - don't retry
+          throw new Error(`Model ${config.model} not available: ${errorText}`);
+        } else if (response.status >= 400 && response.status < 500) {
+          // Client error - don't retry
+          throw new Error(`OpenRouter client error: ${response.status} - ${errorText}`);
+        }
+        
+        // Server error - retry with backoff
+        if (attempt === maxRetries) {
+          throw new Error(`OpenRouter API error after ${maxRetries} attempts: ${response.status} - ${errorText}`);
+        }
+        
+        const waitTime = Math.min(1000 * Math.pow(2, attempt - 1), 15000);
+        logger?.warn("⏳ [AIService] Server error, waiting before retry", { 
+          waitTime, 
+          attempt, 
+          status: response.status 
+        });
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+        continue;
+      }
+
+      const data = await response.json();
+      
+      if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+        if (attempt === maxRetries) {
+          throw new Error("Invalid response format from OpenRouter");
+        }
+        logger?.warn("⚠️ [AIService] Invalid response format, retrying", { attempt });
+        continue;
+      }
+
+      const result = data.choices[0].message.content;
+      
+      logger?.info("✅ [AIService] OpenRouter request successful", { 
+        model: config.model,
+        responseLength: result.length,
+        tokensUsed: data.usage?.total_tokens || 'unknown',
+        attempt
+      });
+
+      return result;
+
+    } catch (error) {
+      if (attempt === maxRetries) {
+        logger?.error("❌ [AIService] OpenRouter failed after all retries", {
+          model: config.model,
+          maxRetries,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
+
+      logger?.warn("⚠️ [AIService] OpenRouter attempt failed, retrying", {
+        attempt,
+        error: error instanceof Error ? error.message : String(error),
+      });
+
+      // General retry backoff
+      const waitTime = Math.min(1000 * Math.pow(2, attempt - 1), 15000);
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+    }
   }
 
-  const data = await response.json();
-  
-  if (!data.choices || !data.choices[0] || !data.choices[0].message) {
-    throw new Error("Invalid response format from OpenRouter");
-  }
-
-  const result = data.choices[0].message.content;
-  
-  logger?.info("✅ [AIService] OpenRouter request successful", { 
-    model: config.model,
-    responseLength: result.length,
-    tokensUsed: data.usage?.total_tokens || 'unknown'
-  });
-
-  return result;
+  throw new Error(`OpenRouter failed after ${maxRetries} attempts`);
 };
 
 const callOllama = async (config: AIRequestConfig, logger?: IMastraLogger) => {

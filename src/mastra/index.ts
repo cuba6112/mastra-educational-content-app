@@ -13,9 +13,13 @@ import { wikipediaResearchTool } from "./tools/wikipediaResearchTool";
 import { webScrapingTool } from "./tools/webScrapingTool";
 import { pdfGenerationTool } from "./tools/pdfGenerationTool";
 import { aiServiceTool } from "./tools/aiServiceTool";
+import { chunkedContentGenerationTool } from "./tools/chunkedContentGenerationTool";
+import { progressTrackingTool } from "./tools/progressTrackingTool";
 import { ideaGenerationAgent } from "./agents/ideaGenerationAgent";
 import { writingAgent } from "./agents/writingAgent";
 import { reviewAgent } from "./agents/reviewAgent";
+import { improvedEducationalContentWorkflow } from "./workflows/improvedEducationalContentWorkflow";
+import { registerCronWorkflow } from "./inngest";
 
 class ProductionPinoLogger extends MastraLogger {
   protected logger: pino.Logger;
@@ -61,7 +65,7 @@ class ProductionPinoLogger extends MastraLogger {
 export const mastra = new Mastra({
   storage: sharedPostgresStorage,
   agents: {},
-  workflows: {},
+  workflows: { improvedEducationalContentWorkflow },
   mcpServers: {
     allTools: new MCPServer({
       name: "allTools",
@@ -71,6 +75,8 @@ export const mastra = new Mastra({
         webScrapingTool,
         pdfGenerationTool,
         aiServiceTool,
+        chunkedContentGenerationTool,
+        progressTrackingTool,
       },
     }),
   },
@@ -163,3 +169,9 @@ if (Object.keys(mastra.getAgents()).length > 1) {
     "More than 1 agents found. Currently, more than 1 agents are not supported in the UI, since doing so will cause app state to be inconsistent.",
   );
 }
+
+// Register the improved educational content creation workflow to run daily at 9 AM
+registerCronWorkflow(
+  `TZ=${process.env.SCHEDULE_CRON_TIMEZONE || 'America/Los_Angeles'} ${process.env.SCHEDULE_CRON_EXPRESSION || '0 9 * * *'}`,
+  improvedEducationalContentWorkflow
+);

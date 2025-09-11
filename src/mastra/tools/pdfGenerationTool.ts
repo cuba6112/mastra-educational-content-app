@@ -1,8 +1,9 @@
 import { createTool } from "@mastra/core/tools";
 import type { IMastraLogger } from "@mastra/core/logger";
 import { z } from "zod";
-import { writeFileSync, mkdirSync } from "fs";
+import { writeFileSync, mkdirSync, statSync } from "fs";
 import { join } from "path";
+import puppeteer from "puppeteer";
 
 interface Chapter {
   title: string;
@@ -138,26 +139,85 @@ const generatePDF = async ({
 </body>
 </html>`;
 
-    // Save HTML file
+    // Save HTML file temporarily
     const sanitizedTitle = bookContent.title.replace(/[^a-zA-Z0-9]/g, '_');
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const filename = `${sanitizedTitle}_${timestamp}`;
     const htmlPath = join(outputDir, `${filename}.html`);
+    const pdfPath = join(outputDir, `${filename}.pdf`);
     
     writeFileSync(htmlPath, htmlContent, 'utf8');
 
-    logger?.info("📄 [PDFGeneration] HTML file generated successfully", { 
-      path: htmlPath,
-      fileSize: htmlContent.length 
+    logger?.info("📄 [PDFGeneration] HTML file generated, converting to PDF", { 
+      htmlPath,
+      pdfPath 
     });
 
-    // For now, we're generating HTML. In a production environment,
-    // you could use tools like Puppeteer or WeasyPrint to convert to PDF
+    // Generate PDF using Puppeteer
+    const browser = await puppeteer.launch({
+      headless: true,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--no-first-run',
+        '--disable-default-apps',
+        '--disable-extensions'
+      ]
+    });
+
+    try {
+      const page = await browser.newPage();
+      
+      // Set page format for book-like appearance
+      await page.setContent(htmlContent, { 
+        waitUntil: 'networkidle0',
+        timeout: 30000 
+      });
+      
+      // Generate PDF with proper formatting
+      await page.pdf({
+        path: pdfPath,
+        format: 'A4',
+        printBackground: true,
+        margin: {
+          top: '20mm',
+          right: '15mm',
+          bottom: '20mm',
+          left: '15mm'
+        },
+        displayHeaderFooter: true,
+        headerTemplate: '<div></div>',
+        footerTemplate: `
+          <div style="font-size: 10px; margin: auto; color: #666;">
+            <span class="pageNumber"></span> / <span class="totalPages"></span>
+          </div>
+        `
+      });
+      
+      logger?.info("📄 [PDFGeneration] PDF generated successfully", { 
+        pdfPath
+      });
+      
+    } finally {
+      await browser.close();
+    }
+
+    // Get file size of the generated PDF
+    const pdfStats = statSync(pdfPath);
+    const pdfSize = pdfStats.size;
+
+    logger?.info("✅ [PDFGeneration] PDF conversion completed", {
+      pdfPath,
+      pdfSize
+    });
+
     return {
       title: bookContent.title,
-      format: 'html',
-      path: htmlPath,
-      fileSize: htmlContent.length,
+      format: 'pdf',
+      path: pdfPath,
+      fileSize: pdfSize,
       chapterCount: bookContent.chapters.length,
       generatedAt: new Date().toISOString(),
     };
@@ -210,6 +270,7 @@ export const pdfGenerationTool = createTool({
     logger?.info("✅ [PDFGeneration] Completed successfully", { 
       path: result.path,
       fileSize: result.fileSize,
+      format: result.format
     });
     
     return result;

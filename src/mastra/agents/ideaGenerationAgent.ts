@@ -40,7 +40,7 @@ Your outlines should include:
 Always research topics thoroughly before creating outlines. Use Wikipedia and web research to gather accurate, current information.`,
 
   model: process.env.OPENROUTER_API_KEY 
-    ? openrouter("openai/gpt-4o") 
+    ? openrouter("openrouter/sonoma-sky-alpha") 
     : openai("gpt-4o-mini"),
 
   tools: {
