@@ -213,6 +213,7 @@ const generateAllContentStep = createStep({
               context: outline,
               sectionIndex,
               retryAttempts: 3,
+              workflowId,
             },
             runtimeContext,
             tracingContext: {},
@@ -415,7 +416,7 @@ Provide:
       { role: "user", content: reviewPrompt },
     ], {
       resourceId: "content-review",
-      threadId: workflowId,
+      threadId: `review-${workflowId}`,
       maxSteps: 8,
     });
 

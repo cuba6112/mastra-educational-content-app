@@ -1,6 +1,7 @@
 import { createTool } from "@mastra/core/tools";
 import type { IMastraLogger } from "@mastra/core/logger";
 import { z } from "zod";
+import { writingAgent } from "../agents/writingAgent";
 
 interface ContentChunk {
   sectionTitle: string;
@@ -23,10 +24,12 @@ const generateContentChunk = async ({
   config,
   sectionIndex,
   logger,
+  workflowId,
 }: {
   config: ChunkGenerationConfig;
   sectionIndex: number;
   logger?: IMastraLogger;
+  workflowId?: string;
 }): Promise<ContentChunk> => {
   const { topic, chapterTitle, chapterNumber, sectionTitles, targetWordsPerSection, context } = config;
   const sectionTitle = sectionTitles[sectionIndex];
@@ -73,9 +76,14 @@ INSTRUCTIONS:
 
 Write the content for "${sectionTitle}" now:`;
 
-      // For this example, I'll simulate AI generation
-      // In production, this would call your actual AI service
-      const response = await simulateAIGeneration(prompt, targetWordsPerSection, logger);
+      // Use the actual writing agent instead of simulation
+      const { text: response } = await writingAgent.generate([
+        { role: "user", content: prompt },
+      ], {
+        resourceId: "content-generation",
+        threadId: `writing-${workflowId || Date.now()}-${chapterNumber}-${sectionIndex}`,
+        maxSteps: 5,
+      });
       
       const wordCount = response.split(/\s+/).length;
       
@@ -114,43 +122,6 @@ Write the content for "${sectionTitle}" now:`;
   throw new Error(`Failed to generate content for section "${sectionTitle}"`);
 };
 
-// Simulate AI generation for testing - replace with actual AI service call
-const simulateAIGeneration = async (prompt: string, targetWords: number, logger?: IMastraLogger): Promise<string> => {
-  logger?.info("🤖 [SimulatedAI] Generating content", { targetWords });
-  
-  // Simulate some processing time
-  await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 2000));
-  
-  // Generate placeholder content with approximately the right word count
-  const wordsNeeded = targetWords;
-  const sentences = [];
-  let currentWordCount = 0;
-  
-  while (currentWordCount < wordsNeeded) {
-    const sentenceLength = 15 + Math.floor(Math.random() * 20); // 15-35 words per sentence
-    const sentence = generatePlaceholderSentence(sentenceLength);
-    sentences.push(sentence);
-    currentWordCount += sentenceLength;
-  }
-  
-  return sentences.join(' ');
-};
-
-const generatePlaceholderSentence = (wordCount: number): string => {
-  const words = [
-    'educational', 'content', 'learning', 'understanding', 'concepts', 'principles', 'methods',
-    'techniques', 'approaches', 'strategies', 'implementation', 'practical', 'theoretical',
-    'fundamental', 'advanced', 'comprehensive', 'detailed', 'effective', 'important',
-    'essential', 'critical', 'valuable', 'useful', 'relevant', 'significant', 'appropriate'
-  ];
-  
-  const sentence = [];
-  for (let i = 0; i < wordCount; i++) {
-    sentence.push(words[Math.floor(Math.random() * words.length)]);
-  }
-  
-  return sentence.join(' ') + '.';
-};
 
 export const chunkedContentGenerationTool = createTool({
   id: "chunked-content-generation-tool",
@@ -164,6 +135,7 @@ export const chunkedContentGenerationTool = createTool({
     context: z.string().describe("Overall context and outline for the educational content"),
     sectionIndex: z.number().describe("Index of the section to generate (0-based)"),
     retryAttempts: z.number().default(3).describe("Number of retry attempts for failed generations"),
+    workflowId: z.string().optional().describe("Workflow ID for thread management"),
   }),
   outputSchema: z.object({
     sectionTitle: z.string(),
@@ -178,6 +150,7 @@ export const chunkedContentGenerationTool = createTool({
       topic: context.topic,
       chapterTitle: context.chapterTitle,
       sectionIndex: context.sectionIndex,
+      workflowId: context.workflowId,
     });
 
     const config: ChunkGenerationConfig = {
@@ -194,6 +167,7 @@ export const chunkedContentGenerationTool = createTool({
       config,
       sectionIndex: context.sectionIndex,
       logger,
+      workflowId: context.workflowId,
     });
 
     logger?.info("✅ [ChunkedGeneration] Completed successfully", {
