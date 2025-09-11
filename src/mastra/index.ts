@@ -13,6 +13,9 @@ import { wikipediaResearchTool } from "./tools/wikipediaResearchTool";
 import { webScrapingTool } from "./tools/webScrapingTool";
 import { pdfGenerationTool } from "./tools/pdfGenerationTool";
 import { aiServiceTool } from "./tools/aiServiceTool";
+import { ideaGenerationAgent } from "./agents/ideaGenerationAgent";
+import { writingAgent } from "./agents/writingAgent";
+import { reviewAgent } from "./agents/reviewAgent";
 
 class ProductionPinoLogger extends MastraLogger {
   protected logger: pino.Logger;
