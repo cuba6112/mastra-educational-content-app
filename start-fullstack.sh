@@ -110,6 +110,13 @@ if [ ! -d "frontend" ]; then
     cd ..
 fi
 
+if [ -z "${NEXT_PUBLIC_API_BASE_URL}" ]; then
+    export NEXT_PUBLIC_API_BASE_URL="http://localhost:5001"
+    print_info "🔗 Setting NEXT_PUBLIC_API_BASE_URL to ${NEXT_PUBLIC_API_BASE_URL}"
+else
+    print_info "🔗 Using NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL}"
+fi
+
 # Install dependencies
 print_info "📦 Installing dependencies..."
 

@@ -265,6 +265,16 @@ const generateAllContentStep = createStep({
             tracingContext: {},
           });
 
+          await progressTrackingTool.execute({
+            context: {
+              action: 'fail',
+              workflowId,
+              error: `Failed to generate section "${sectionTitle}": ${error instanceof Error ? error.message : String(error)}`,
+            },
+            runtimeContext,
+            tracingContext: {},
+          });
+
           throw error;
         }
       }

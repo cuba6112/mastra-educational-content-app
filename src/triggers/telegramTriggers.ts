@@ -39,11 +39,24 @@ export function registerTelegramTrigger({
 
           logger?.info("📝 [Telegram] payload", payload);
 
+          const message = payload?.message;
+          if (
+            !message ||
+            typeof message.text !== "string" ||
+            typeof message.from?.username !== "string"
+          ) {
+            logger?.warn("[Telegram] Ignoring unsupported update", {
+              hasMessage: Boolean(message),
+              messageType: payload?.update_id ? Object.keys(payload).join(",") : undefined,
+            });
+            return c.text("OK", 200);
+          }
+
           await handler(mastra, {
             type: triggerType,
             params: {
-              userName: payload.message.from.username,
-              message: payload.message.text,
+              userName: message.from.username,
+              message: message.text,
             },
             payload,
           } as TriggerInfoTelegramOnNewMessage);

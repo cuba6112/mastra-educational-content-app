@@ -290,16 +290,36 @@ export function registerSlackTrigger<
             return c.text("OK", 200);
           }
 
+          const channelId =
+            typeof payload.event?.channel === "string"
+              ? payload.event.channel
+              : null;
+
+          if (!channelId) {
+            logger?.warn("[Slack] Received event without channel identifier", {
+              eventId: payload.event_id,
+            });
+            return c.text("OK", 200);
+          }
+
+          const channelDisplayName =
+            typeof payload.channel?.name === "string"
+              ? payload.channel.name
+              : channelId;
+
           const result = await handler(mastra, {
             type: triggerType,
             params: {
-              channel: payload.event.channel,
-              channelDisplayName: payload.channel.name,
+              channel: channelId,
+              channelDisplayName,
             },
             payload,
           } as TriggerInfoSlackOnNewMessage);
 
-          await reactToMessage(payload.event.channel, payload.event.ts, result);
+          const timestamp = typeof payload.event?.ts === "string" ? payload.event.ts : null;
+          if (timestamp) {
+            await reactToMessage(channelId, timestamp, result);
+          }
 
           return c.text("OK", 200);
         } catch (error) {

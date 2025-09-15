@@ -4,55 +4,104 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useState } from 'react'
 import { BookOpen, Sparkles, Users, Target, Loader2 } from 'lucide-react'
-import { WorkflowProgress } from '@/components/WorkflowProgress'
+import { WorkflowProgress, type WorkflowResult } from '@/components/WorkflowProgress'
+import { apiUrl } from '@/lib/api'
 // import { ContentPreview } from '@/components/ContentPreview'
 
 export default function Home() {
   const [isGenerating, setIsGenerating] = useState(false)
   const [currentWorkflowId, setCurrentWorkflowId] = useState<string | null>(null)
   const [showProgress, setShowProgress] = useState(false)
-  const [workflowResult, setWorkflowResult] = useState<any>(null)
+  const [workflowResult, setWorkflowResult] = useState<WorkflowResult | null>(null)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [formData, setFormData] = useState({
     topic: '',
     targetAudience: '',
     targetWordCount: 5000
   })
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const startWorkflowSequence = async () => {
     setIsGenerating(true)
-    
+    setErrorMessage(null)
+    setWorkflowResult(null)
+    setCurrentWorkflowId(null)
+
     try {
-      // API call to backend
-      const response = await fetch('http://localhost:5001/api/workflows/improvedEducationalContentWorkflow/start-async', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          inputData: formData,
-          runtimeContext: {}
-        })
-      })
-      
-      if (response.ok) {
-        const result = await response.json()
-        console.log('Workflow started:', result)
-        
-        // Extract workflow ID from result or generate one
-        const workflowId = result.workflowId || result.id || `edu-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
-        setCurrentWorkflowId(workflowId)
-        setShowProgress(true)
-      } else {
-        console.error('Failed to start workflow')
-        alert('Failed to start content generation. Please check if the backend is running.')
+      const startWorkflow = async () => {
+        const maxAttempts = 3
+        let lastError: string | null = null
+
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+          try {
+            const response = await fetch(
+              apiUrl('/api/workflows/improvedEducationalContentWorkflow/start-async'),
+              {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  inputData: formData,
+                  runtimeContext: {}
+                })
+              }
+            )
+
+            if (response.ok) {
+              const data = await response.json()
+              return { data }
+            }
+
+            // Retry on gateway/server warmup errors
+            if ([502, 503, 504].includes(response.status)) {
+              lastError = `Backend is still warming up (HTTP ${response.status}).`
+              await new Promise((resolve) => setTimeout(resolve, attempt * 1500))
+              continue
+            }
+
+            const errorText = await response.text()
+            throw new Error(errorText || `Failed with status ${response.status}`)
+          } catch (error) {
+            lastError = error instanceof Error ? error.message : String(error)
+            if (attempt === maxAttempts) {
+              break
+            }
+            await new Promise((resolve) => setTimeout(resolve, attempt * 1500))
+          }
+        }
+
+        return { error: lastError || 'Failed to start workflow' }
       }
+
+      const startResult = await startWorkflow()
+      if ('error' in startResult) {
+        setErrorMessage(startResult.error)
+        setShowProgress(false)
+        return
+      }
+
+      const result = startResult.data
+
+      console.log('Workflow started:', result)
+      const workflowId = result.workflowId || result.id || `edu-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+      setCurrentWorkflowId(workflowId)
+      setShowProgress(true)
     } catch (error) {
       console.error('Error:', error)
-      alert('Error connecting to backend. Please ensure it is running on port 5001.')
+      const friendlyMessage =
+        error instanceof Error
+          ? error.message
+          : 'Unable to reach the backend service. Please try again.'
+      setErrorMessage(friendlyMessage)
+      setShowProgress(false)
     } finally {
       setIsGenerating(false)
     }
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    await startWorkflowSequence()
   }
 
   return (
@@ -82,14 +131,42 @@ export default function Home() {
                 console.log('Workflow completed:', result)
                 setWorkflowResult(result)
                 setIsGenerating(false)
-                alert('Content generation completed successfully!')
+                setShowProgress(false)
               }}
               onError={(error) => {
                 console.error('Workflow failed:', error)
                 setIsGenerating(false)
-                alert(`Content generation failed: ${error}`)
+                setErrorMessage(error)
               }}
             />
+          </div>
+        )}
+
+        {errorMessage && (
+          <div className="max-w-2xl mx-auto mb-6">
+            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-200 px-4 py-3 rounded-lg">
+              <p className="font-medium">Unable to start content generation</p>
+              <p className="text-sm mt-1">
+                {errorMessage.includes('warming up')
+                  ? `${errorMessage} The workflow engine may still be starting—please retry in a few seconds.`
+                  : errorMessage}
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    void startWorkflowSequence()
+                  }}
+                >
+                  Try Again
+                </Button>
+                <span className="text-xs text-red-500 dark:text-red-300">
+                  Ensure the backend at {process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:5001'} is running.
+                </span>
+              </div>
+            </div>
           </div>
         )}
 
@@ -184,6 +261,8 @@ export default function Home() {
                       setShowProgress(false)
                       setCurrentWorkflowId(null)
                       setIsGenerating(false)
+                      setWorkflowResult(null)
+                      setErrorMessage(null)
                     }}
                   >
                     Reset
@@ -202,15 +281,49 @@ export default function Home() {
         {/* Content Preview Section */}
         {workflowResult && (
           <div className="max-w-4xl mx-auto mt-8">
-            <div className="bg-green-50 dark:bg-green-900/20 p-6 rounded-lg">
-              <h3 className="text-lg font-semibold text-green-800 dark:text-green-200 mb-4">
-                Content Generated Successfully!
-              </h3>
-              {workflowResult.wordCount && (
-                <p className="text-sm text-green-700 dark:text-green-300">
-                  Generated {workflowResult.wordCount.toLocaleString()} words of educational content.
-                </p>
-              )}
+            <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 p-6 rounded-lg space-y-4">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="text-lg font-semibold text-green-800 dark:text-green-200">
+                    Content Generated Successfully
+                  </h3>
+                  {workflowResult.wordCount && (
+                    <p className="text-sm text-green-700 dark:text-green-300 mt-1">
+                      Generated {workflowResult.wordCount.toLocaleString()} words of educational material.
+                    </p>
+                  )}
+                  {workflowResult.completedAt && (
+                    <p className="text-xs text-green-600 dark:text-green-400 mt-2">
+                      Completed at {new Date(workflowResult.completedAt).toLocaleString()}
+                    </p>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  {workflowResult.pdfUrl && (
+                    <a
+                      href={workflowResult.pdfUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700"
+                    >
+                      Download PDF
+                    </a>
+                  )}
+                  {workflowResult.contentUrl && (
+                    <a
+                      href={workflowResult.contentUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center rounded-md border border-green-600 px-4 py-2 text-sm font-medium text-green-700 hover:bg-green-100"
+                    >
+                      View Content
+                    </a>
+                  )}
+                </div>
+              </div>
+              <p className="text-sm text-green-700 dark:text-green-300">
+                Looking for your files? Generated PDFs are stored under <code>generated_books/</code> on the backend.
+              </p>
             </div>
           </div>
         )}

@@ -1,11 +1,12 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { Progress } from '@/components/ui/progress'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Loader2, CheckCircle, AlertCircle, Clock, Download, FileText, Search, Edit, BookOpen, Zap } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { apiUrl } from '@/lib/api'
 
 export interface WorkflowStep {
   id: string
@@ -23,6 +24,13 @@ export interface WorkflowStep {
   }>
 }
 
+export interface WorkflowResult {
+  contentUrl?: string
+  pdfUrl?: string
+  wordCount?: number
+  completedAt?: string
+}
+
 export interface WorkflowProgress {
   workflowId: string
   status: 'running' | 'completed' | 'failed'
@@ -31,16 +39,12 @@ export interface WorkflowProgress {
   currentStep?: string
   startTime: string
   endTime?: string
-  result?: {
-    contentUrl?: string
-    pdfUrl?: string
-    wordCount?: number
-  }
+  result?: WorkflowResult
 }
 
 interface WorkflowProgressProps {
   workflowId: string
-  onComplete?: (result: any) => void
+  onComplete?: (result: WorkflowResult) => void
   onError?: (error: string) => void
 }
 
@@ -48,6 +52,29 @@ export function WorkflowProgress({ workflowId, onComplete, onError }: WorkflowPr
   const [progress, setProgress] = useState<WorkflowProgress | null>(null)
   const [isPolling, setIsPolling] = useState(true)
   const intervalRef = useRef<NodeJS.Timeout | null>(null)
+  const [elapsedSeconds, setElapsedSeconds] = useState(0)
+
+  const formatDuration = (totalSeconds: number) => {
+    if (totalSeconds <= 0 || Number.isNaN(totalSeconds)) return '0s'
+    const hours = Math.floor(totalSeconds / 3600)
+    const minutes = Math.floor((totalSeconds % 3600) / 60)
+    const seconds = totalSeconds % 60
+
+    const parts: string[] = []
+    if (hours > 0) parts.push(`${hours}h`)
+    if (minutes > 0) parts.push(`${minutes}m`)
+    if (seconds > 0 && hours === 0) parts.push(`${seconds}s`)
+    return parts.join(' ')
+  }
+
+  const activeStep = useMemo(() => {
+    if (!progress) return null
+    return (
+      progress.steps.find((step) => step.status === 'in_progress') ||
+      progress.steps.find((step) => step.status === 'pending') ||
+      null
+    )
+  }, [progress])
 
   // Poll for progress updates
   useEffect(() => {
@@ -55,7 +82,9 @@ export function WorkflowProgress({ workflowId, onComplete, onError }: WorkflowPr
 
     const pollProgress = async () => {
       try {
-        const response = await fetch(`http://localhost:5001/api/workflows/${workflowId}/progress`)
+        const response = await fetch(
+          apiUrl(`/api/workflows/${workflowId}/progress`)
+        )
         
         if (response.ok) {
           const progressData: WorkflowProgress = await response.json()
@@ -104,6 +133,28 @@ export function WorkflowProgress({ workflowId, onComplete, onError }: WorkflowPr
       }
     }
   }, [])
+
+  useEffect(() => {
+    if (!progress) return
+
+    const startTimeMs = new Date(progress.startTime).getTime()
+    const endTimeMs = progress.endTime ? new Date(progress.endTime).getTime() : null
+
+    const updateElapsed = () => {
+      const now = endTimeMs ?? Date.now()
+      const seconds = Math.max(0, Math.floor((now - startTimeMs) / 1000))
+      setElapsedSeconds(seconds)
+    }
+
+    updateElapsed()
+
+    if (progress.status === 'running') {
+      const timer = setInterval(updateElapsed, 1000)
+      return () => clearInterval(timer)
+    }
+
+    return undefined
+  }, [progress])
 
   if (!progress) {
     return (
@@ -188,12 +239,25 @@ export function WorkflowProgress({ workflowId, onComplete, onError }: WorkflowPr
       <CardContent className="space-y-6">
         {/* Overall Progress */}
         <div className="space-y-3">
-          <div className="flex justify-between text-sm font-medium">
-            <span>Overall Progress</span>
-            <span className="text-blue-600">{Math.round(progress.progress)}%</span>
+          <div className="flex flex-wrap items-center justify-between gap-2 text-sm font-medium">
+            <div className="flex items-center gap-2">
+              <span>Overall Progress</span>
+              {activeStep?.name && (
+                <Badge variant="outline" className="bg-blue-50 text-blue-700">
+                  {activeStep.name}
+                </Badge>
+              )}
+            </div>
+            <div className="flex items-center gap-4 text-xs text-gray-500">
+              <span className="font-semibold text-blue-600">{Math.round(progress.progress)}%</span>
+              <span className="flex items-center gap-1">
+                <Clock className="h-3 w-3" />
+                Elapsed {formatDuration(elapsedSeconds)}
+              </span>
+            </div>
           </div>
           <div className="space-y-2">
-            <Progress value={progress.progress} className="w-full h-3" />
+            <Progress value={progress.progress} className="w-full h-3 overflow-hidden" />
             <div className="grid grid-cols-4 gap-1 text-xs text-gray-500">
               <div className="text-center">Start</div>
               <div className="text-center">25%</div>
@@ -233,6 +297,11 @@ export function WorkflowProgress({ workflowId, onComplete, onError }: WorkflowPr
               {progress.steps.filter(s => s.status === 'completed').length} of {progress.steps.length} completed
             </div>
           </div>
+          {activeStep && (
+            <div className="text-xs text-blue-600 dark:text-blue-300">
+              Currently processing: {activeStep.name}
+            </div>
+          )}
           
           <div className="space-y-3">
             {progress.steps.map((step, index) => {
@@ -430,7 +499,7 @@ export function WorkflowProgress({ workflowId, onComplete, onError }: WorkflowPr
                 <div className="flex items-center space-x-2 sm:col-span-2">
                   <Zap className="h-3 w-3 text-blue-500" />
                   <span className="font-medium">
-                    Total Duration: {Math.round((new Date(progress.endTime).getTime() - new Date(progress.startTime).getTime()) / 1000)}s
+                    Total Duration: {formatDuration(Math.floor((new Date(progress.endTime).getTime() - new Date(progress.startTime).getTime()) / 1000))}
                   </span>
                 </div>
               </>
@@ -438,7 +507,7 @@ export function WorkflowProgress({ workflowId, onComplete, onError }: WorkflowPr
             {!progress.endTime && progress.status === 'running' && (
               <div className="flex items-center space-x-2">
                 <Loader2 className="h-3 w-3 animate-spin text-blue-500" />
-                <span>Running for {Math.round((Date.now() - new Date(progress.startTime).getTime()) / 1000)}s</span>
+                <span>Running for {formatDuration(elapsedSeconds)}</span>
               </div>
             )}
           </div>
